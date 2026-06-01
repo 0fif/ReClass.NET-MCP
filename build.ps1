@@ -1,7 +1,8 @@
 # Build script for ReClassMCP plugin
 param(
     [string]$Configuration = "Release",
-    [string]$Platform = "x64"
+    [string]$Platform = "x64",
+    [switch]$SkipReClassPinCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +10,51 @@ $ErrorActionPreference = "Stop"
 Write-Host "Building ReClassMCP Plugin..." -ForegroundColor Cyan
 Write-Host "Configuration: $Configuration"
 Write-Host "Platform: $Platform"
+
+$reclassDir = Join-Path $PSScriptRoot "ReClass.NET"
+$reclassPinFile = Join-Path $PSScriptRoot "RECLASSNET_COMMIT"
+
+if (-not (Test-Path (Join-Path $reclassDir ".git"))) {
+    Write-Host "ERROR: ReClass.NET source checkout not found at: $reclassDir" -ForegroundColor Red
+    Write-Host "Clone the pinned source before building:" -ForegroundColor Yellow
+    Write-Host "  git clone https://github.com/ReClassNET/ReClass.NET.git ReClass.NET"
+    Write-Host "  git -C ReClass.NET checkout $(Get-Content $reclassPinFile)"
+    exit 1
+}
+
+if (-not $SkipReClassPinCheck -and (Test-Path $reclassPinFile)) {
+    $expectedCommit = Get-Content $reclassPinFile |
+        Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") } |
+        Select-Object -First 1
+    $currentCommit = (& git -C $reclassDir rev-parse HEAD).Trim()
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Unable to read ReClass.NET git commit." -ForegroundColor Red
+        exit 1
+    }
+
+    if ($currentCommit -ne $expectedCommit) {
+        Write-Host "ERROR: ReClass.NET checkout is not at the pinned commit." -ForegroundColor Red
+        Write-Host "Expected: $expectedCommit"
+        Write-Host "Actual:   $currentCommit"
+        Write-Host "Run: git -C ReClass.NET checkout $expectedCommit" -ForegroundColor Yellow
+        Write-Host "Or pass -SkipReClassPinCheck if you intentionally want a different ReClass.NET build."
+        exit 1
+    }
+}
+
+$reclassOutputExe = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "ReClass.NET\ReClass.NET\bin\$Configuration\$Platform\ReClass.NET.exe"))
+$runningReClass = Get-CimInstance Win32_Process -Filter "Name = 'ReClass.NET.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ExecutablePath -and ([IO.Path]::GetFullPath($_.ExecutablePath) -ieq $reclassOutputExe) }
+
+if ($runningReClass) {
+    Write-Host "ERROR: ReClass.NET is running from the build output and is locking the executable." -ForegroundColor Red
+    $runningReClass | ForEach-Object {
+        Write-Host "PID $($_.ProcessId): $($_.ExecutablePath)"
+    }
+    Write-Host "Close ReClass.NET before rebuilding." -ForegroundColor Yellow
+    exit 1
+}
 
 # Find MSBuild
 $msbuildPath = $null
@@ -135,17 +181,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $outputPath = "ReClassMCP.Plugin\bin\$Platform\$Configuration"
+$pluginDll = Join-Path $outputPath "ReClassMCP.dll"
 Write-Host "`nBuild successful!" -ForegroundColor Green
-Write-Host "Output: $outputPath\ReClassMCP.Plugin.dll"
+Write-Host "Output: $pluginDll"
 
 # Copy to ReClass.NET plugins folder if it exists
-$reclassPluginsPath = "ReClass.NET\ReClass.NET\bin\$Platform\$Configuration\Plugins"
+$reclassPluginsPath = "ReClass.NET\ReClass.NET\bin\$Configuration\$Platform\Plugins"
 if (Test-Path (Split-Path $reclassPluginsPath)) {
     if (-not (Test-Path $reclassPluginsPath)) {
         New-Item -ItemType Directory -Path $reclassPluginsPath -Force | Out-Null
     }
 
-    Copy-Item "$outputPath\ReClassMCP.Plugin.dll" $reclassPluginsPath -Force
+    Copy-Item $pluginDll $reclassPluginsPath -Force
 
     # Copy Newtonsoft.Json if it exists in packages
     $jsonDll = Get-ChildItem -Path $packagesDir -Recurse -Filter "Newtonsoft.Json.dll" |

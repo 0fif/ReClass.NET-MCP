@@ -18,26 +18,63 @@ An MCP server that:
 - Translates MCP protocol to plugin commands
 - Exposes tools for Claude Code to use
 
+## Compatibility
+
+The C# plugin must be built against the same ReClass.NET code that you run.
+
+Downloading the official ReClass.NET `v1.2` release zip is not the same as
+cloning ReClass.NET and building current `master`. The release zip is old tagged
+code from 2019. Current `master` is newer unreleased source code.
+
+Do not build the plugin against current `master` and then load it into the old
+`v1.2` release zip. Build and run them from the same ReClass.NET checkout.
+
+ReClass.NET may still report assembly version `1.2.0.0` across incompatible
+source snapshots, so the assembly version alone is not a compatibility check.
+
+There is no newer official release number than `v1.2` right now, but there is
+newer source code. This matters because the `v1.2` release zip and current source
+can both identify as `1.2.0.0` while exposing different APIs:
+
+```text
+official v1.2 release zip -> ClassNode.Uuid is NodeUuid
+current master source     -> ClassNode.Uuid is Guid
+```
+
+This fork pins the intended ReClass.NET source commit in `RECLASSNET_COMMIT`.
+The build script checks that `ReClass.NET/` is present and checked out at that
+commit before compiling.
+
+The plugin also avoids direct compile-time UUID calls so class lookup works with
+both known UUID shapes:
+
+- older v1.2 release builds: `ClassNode.Uuid : NodeUuid`
+- newer source builds: `ClassNode.Uuid : Guid`
+
 ## Installation
 
 ### Getting the Plugin
 
-**Option 1: Download Pre-built Release (Recommended)**
+**Option 1: Download Pre-built Release**
 
 1. Download `ReClassMCP.zip` from the [Releases](../../releases) page
-2. Extract and copy the contents of the `x64/` or `x86/` folder (match your ReClass.NET version) to your ReClass.NET `Plugins` folder
-3. The `MCP-Server/` folder contains the Python MCP server
+2. Use it only with the ReClass.NET build named in that release
+3. Extract and copy the contents of the `x64/` or `x86/` folder to that ReClass.NET `Plugins` folder
+4. The `MCP-Server/` folder contains the Python MCP server
 
 **Option 2: Build from Source**
 
-1. Clone this repo and ReClass.NET:
-   ```bash
-   git clone https://github.com/NateWeav/ReClassMCP.git
-   cd ReClassMCP
+1. Clone this repo and the pinned ReClass.NET source:
+   ```powershell
+   git clone https://github.com/0fif/ReClass.NET-MCP.git
+   cd ReClass.NET-MCP
    git clone https://github.com/ReClassNET/ReClass.NET.git
+   git -C ReClass.NET checkout (Get-Content .\RECLASSNET_COMMIT)
    ```
-2. Open the solution in Visual Studio 2019+ or run `build.ps1`
-3. Copy `ReClassMCP.dll` and `Newtonsoft.Json.dll` from the build output to ReClass.NET's `Plugins` folder
+2. Close ReClass.NET if it is already running from this checkout
+3. Open the solution in Visual Studio 2019+ or run `.\build.ps1`
+4. Run the ReClass.NET executable from the built `ReClass.NET` tree
+5. Copy `ReClassMCP.dll` and `Newtonsoft.Json.dll` from the build output to that same ReClass.NET `Plugins` folder
 
 ### Installing the MCP Server
 
@@ -58,7 +95,7 @@ Add the following to your Claude Code MCP configuration file (`~/.claude/mcp.jso
   "mcpServers": {
     "reclass": {
       "command": "python",
-      "args": ["/path/to/ReClassMCP/ReClassMCP.Server/reclass_mcp_server.py"],
+      "args": ["/path/to/ReClass.NET-MCP/ReClassMCP.Server/reclass_mcp_server.py"],
       "env": {}
     }
   }
@@ -72,7 +109,7 @@ Or using `uv`:
   "mcpServers": {
     "reclass": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/ReClassMCP/ReClassMCP.Server", "python", "reclass_mcp_server.py"],
+      "args": ["run", "--directory", "/path/to/ReClass.NET-MCP/ReClassMCP.Server", "python", "reclass_mcp_server.py"],
       "env": {}
     }
   }

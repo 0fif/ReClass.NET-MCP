@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Forms;
 using Newtonsoft.Json.Linq;
 using ReClassNET.Memory;
@@ -11,6 +12,8 @@ namespace ReClassMCP
 {
     public class CommandHandler
     {
+        private static readonly PropertyInfo ClassUuidProperty = typeof(ClassNode).GetProperty("Uuid");
+
         private readonly IPluginHost host;
 
         public CommandHandler(IPluginHost host)
@@ -208,7 +211,7 @@ namespace ReClassMCP
             {
                 classes.Add(new JObject
                 {
-                    ["uuid"] = cls.Uuid.ToString(),
+                    ["uuid"] = GetClassUuid(cls),
                     ["name"] = cls.Name,
                     ["address"] = cls.AddressFormula,
                     ["size"] = cls.MemorySize,
@@ -230,27 +233,14 @@ namespace ReClassMCP
             if (string.IsNullOrEmpty(identifier))
                 return Error("Missing 'id' or 'name' parameter");
 
-            ClassNode classNode = null;
-
-            // Try by UUID
-            if (Guid.TryParse(identifier, out var guid))
-            {
-                classNode = project.Classes.FirstOrDefault(c => c.Uuid == guid);
-            }
-
-            // Try by name
-            if (classNode == null)
-            {
-                classNode = project.Classes.FirstOrDefault(c =>
-                    c.Name.Equals(identifier, StringComparison.OrdinalIgnoreCase));
-            }
+            var classNode = FindClass(project.Classes, identifier);
 
             if (classNode == null)
                 return Error($"Class not found: {identifier}");
 
             return Success(new JObject
             {
-                ["uuid"] = classNode.Uuid.ToString(),
+                ["uuid"] = GetClassUuid(classNode),
                 ["name"] = classNode.Name,
                 ["address"] = classNode.AddressFormula,
                 ["size"] = classNode.MemorySize,
@@ -269,18 +259,7 @@ namespace ReClassMCP
             if (string.IsNullOrEmpty(classId))
                 return Error("Missing 'class_id' or 'class_name' parameter");
 
-            ClassNode classNode = null;
-
-            if (Guid.TryParse(classId, out var guid))
-            {
-                classNode = project.Classes.FirstOrDefault(c => c.Uuid == guid);
-            }
-
-            if (classNode == null)
-            {
-                classNode = project.Classes.FirstOrDefault(c =>
-                    c.Name.Equals(classId, StringComparison.OrdinalIgnoreCase));
-            }
+            var classNode = FindClass(project.Classes, classId);
 
             if (classNode == null)
                 return Error($"Class not found: {classId}");
@@ -453,7 +432,7 @@ namespace ReClassMCP
 
             return Success(new JObject
             {
-                ["uuid"] = classNode.Uuid.ToString(),
+                ["uuid"] = GetClassUuid(classNode),
                 ["name"] = classNode.Name,
                 ["address"] = classNode.AddressFormula
             });
@@ -475,16 +454,7 @@ namespace ReClassMCP
             if (project == null)
                 return Error("No project loaded");
 
-            ClassNode classNode = null;
-            if (Guid.TryParse(classId, out var guid))
-            {
-                classNode = project.Classes.FirstOrDefault(c => c.Uuid == guid);
-            }
-            if (classNode == null)
-            {
-                classNode = project.Classes.FirstOrDefault(c =>
-                    c.Name.Equals(classId, StringComparison.OrdinalIgnoreCase));
-            }
+            var classNode = FindClass(project.Classes, classId);
 
             if (classNode == null)
                 return Error($"Class not found: {classId}");
@@ -539,16 +509,7 @@ namespace ReClassMCP
             if (project == null)
                 return Error("No project loaded");
 
-            ClassNode classNode = null;
-            if (Guid.TryParse(classId, out var guid))
-            {
-                classNode = project.Classes.FirstOrDefault(c => c.Uuid == guid);
-            }
-            if (classNode == null)
-            {
-                classNode = project.Classes.FirstOrDefault(c =>
-                    c.Name.Equals(classId, StringComparison.OrdinalIgnoreCase));
-            }
+            var classNode = FindClass(project.Classes, classId);
 
             if (classNode == null)
                 return Error($"Class not found: {classId}");
@@ -587,16 +548,7 @@ namespace ReClassMCP
             if (project == null)
                 return Error("No project loaded");
 
-            ClassNode classNode = null;
-            if (Guid.TryParse(classId, out var guid))
-            {
-                classNode = project.Classes.FirstOrDefault(c => c.Uuid == guid);
-            }
-            if (classNode == null)
-            {
-                classNode = project.Classes.FirstOrDefault(c =>
-                    c.Name.Equals(classId, StringComparison.OrdinalIgnoreCase));
-            }
+            var classNode = FindClass(project.Classes, classId);
 
             if (classNode == null)
                 return Error($"Class not found: {classId}");
@@ -634,16 +586,7 @@ namespace ReClassMCP
             if (project == null)
                 return Error("No project loaded");
 
-            ClassNode classNode = null;
-            if (Guid.TryParse(classId, out var guid))
-            {
-                classNode = project.Classes.FirstOrDefault(c => c.Uuid == guid);
-            }
-            if (classNode == null)
-            {
-                classNode = project.Classes.FirstOrDefault(c =>
-                    c.Name.Equals(classId, StringComparison.OrdinalIgnoreCase));
-            }
+            var classNode = FindClass(project.Classes, classId);
 
             if (classNode == null)
                 return Error($"Class not found: {classId}");
@@ -754,6 +697,73 @@ namespace ReClassMCP
             }
 
             return null;
+        }
+
+        private ClassNode FindClass(IReadOnlyList<ClassNode> classes, string identifier)
+        {
+            var classNode = classes.FirstOrDefault(c => ClassUuidMatches(c, identifier));
+            if (classNode != null)
+                return classNode;
+
+            return classes.FirstOrDefault(c =>
+                c.Name.Equals(identifier, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private string GetClassUuid(ClassNode classNode)
+        {
+            var uuid = GetClassUuidValue(classNode);
+            return uuid?.ToString() ?? "";
+        }
+
+        private object GetClassUuidValue(ClassNode classNode)
+        {
+            return ClassUuidProperty?.GetValue(classNode, null);
+        }
+
+        private bool ClassUuidMatches(ClassNode classNode, string identifier)
+        {
+            if (string.IsNullOrEmpty(identifier))
+                return false;
+
+            var uuid = GetClassUuidValue(classNode);
+            if (uuid == null)
+                return false;
+
+            foreach (var candidate in GetUuidIdentifiers(uuid))
+            {
+                if (string.Equals(candidate, identifier, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            if (uuid is Guid uuidGuid && Guid.TryParse(identifier, out var identifierGuid))
+                return uuidGuid.Equals(identifierGuid);
+
+            return false;
+        }
+
+        private IEnumerable<string> GetUuidIdentifiers(object uuid)
+        {
+            var value = uuid.ToString();
+            if (!string.IsNullOrEmpty(value))
+                yield return value;
+
+            if (uuid is Guid guid)
+            {
+                yield return guid.ToString("N");
+                yield return guid.ToString("B");
+                yield break;
+            }
+
+            foreach (var methodName in new[] { "ToHexString", "ToBase64String" })
+            {
+                var method = uuid.GetType().GetMethod(methodName, Type.EmptyTypes);
+                if (method?.ReturnType != typeof(string))
+                    continue;
+
+                var identifier = method.Invoke(uuid, null) as string;
+                if (!string.IsNullOrEmpty(identifier))
+                    yield return identifier;
+            }
         }
 
         private ReClassNET.Project.ReClassNetProject GetCurrentProject()
