@@ -1,6 +1,23 @@
 # ReClass.NET MCP Integration
 
-This project provides an MCP (Model Context Protocol) integration for ReClass.NET, allowing Claude Code to interact with ReClass.NET for memory analysis and reverse engineering tasks.
+This fork provides an MCP (Model Context Protocol) integration for ReClass.NET,
+allowing Claude Code, Codex, opencode, and other MCP clients to interact with
+ReClass.NET for memory analysis and reverse engineering tasks.
+
+## Why This Fork
+
+This fork is meant to be the reproducible, compatibility-focused version of the
+original ReClass.NET MCP integration.
+
+Compared with the original project, this fork adds:
+
+- A pinned ReClass.NET source commit in `RECLASSNET_COMMIT`
+- Build checks so the plugin is compiled against the ReClass.NET source it is meant to run with
+- Compatibility handling for `ClassNode.Uuid` API differences between older release builds and newer source builds
+- Exact-offset field insertion with automatic padding/splitting
+- Nested class/structure insertion for real struct composition
+- Safer pointer handling so plain `pointer` fields do not create throwaway dummy classes
+- Updated MCP server docs and `uv` dependency locking
 
 ## Components
 
@@ -16,29 +33,29 @@ A ReClass.NET plugin that:
 An MCP server that:
 - Connects to the ReClass.NET plugin via TCP
 - Translates MCP protocol to plugin commands
-- Exposes tools for Claude Code to use
+- Exposes tools for MCP clients to use
 
 ## Compatibility
 
 The C# plugin must be built against the same ReClass.NET code that you run.
 
-Downloading the official ReClass.NET `v1.2` release zip is not the same as
-cloning ReClass.NET and building current `master`. The release zip is old tagged
-code from 2019. Current `master` is newer unreleased source code.
+Downloading the official ReClass.NET `v1.2` release is not the same as cloning
+ReClass.NET and building current `master`. The release download is old tagged code
+from 2019. Current `master` is newer unreleased source code.
 
 Do not build the plugin against current `master` and then load it into the old
-`v1.2` release zip. Build and run them from the same ReClass.NET checkout.
+official `v1.2` release download. Build and run them from the same ReClass.NET checkout.
 
 ReClass.NET may still report assembly version `1.2.0.0` across incompatible
 source snapshots, so the assembly version alone is not a compatibility check.
 
 There is no newer official release number than `v1.2` right now, but there is
-newer source code. This matters because the `v1.2` release zip and current source
+newer source code. This matters because the official `v1.2` release and current source
 can both identify as `1.2.0.0` while exposing different APIs:
 
 ```text
-official v1.2 release zip -> ClassNode.Uuid is NodeUuid
-current master source     -> ClassNode.Uuid is Guid
+official v1.2 release -> ClassNode.Uuid is NodeUuid
+current master source -> ClassNode.Uuid is Guid
 ```
 
 This fork pins the intended ReClass.NET source commit in `RECLASSNET_COMMIT`.
@@ -86,9 +103,10 @@ cd ReClassMCP.Server
 pip install -r requirements.txt
 ```
 
-### Configuring Claude Code
+### Configuring an MCP Client
 
-Add the following to your Claude Code MCP configuration file (`~/.claude/mcp.json` or project `.claude/mcp.json`):
+Add the following command/args to your MCP client configuration. For Claude Code,
+this goes in `~/.claude/mcp.json` or project `.claude/mcp.json`:
 
 ```json
 {
@@ -150,6 +168,8 @@ Or using `uv`:
 | `GetNodes` | Get all nodes/fields in a class |
 | `CreateClass` | Create a new class/structure |
 | `AddNode` | Add a new field to a class |
+| `AddNodeAtOffset` | Add a new field at an exact byte offset, padding gaps as needed |
+| `AddClassInstanceAtOffset` | Add a nested class/structure field at an exact byte offset |
 | `RenameNode` | Rename a field |
 | `SetComment` | Set a comment on a field |
 | `ChangeNodeType` | Change a field's type |
@@ -165,7 +185,7 @@ Or using `uv`:
 
 ## Usage Example
 
-Once configured, you can ask Claude Code to:
+Once configured, you can ask your MCP client to:
 
 ```
 "Connect to ReClass.NET and show me the current classes"

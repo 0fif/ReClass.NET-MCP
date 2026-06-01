@@ -63,6 +63,12 @@ namespace ReClassMCP
                     case "add_node":
                         return AddNode(args);
 
+                    case "add_node_at_offset":
+                        return AddNodeAtOffset(args);
+
+                    case "add_class_instance_at_offset":
+                        return AddClassInstanceAtOffset(args);
+
                     case "rename_node":
                         return RenameNode(args);
 
@@ -289,6 +295,11 @@ namespace ReClassMCP
                 else if (node is BaseWrapperNode wrapper && wrapper.InnerNode != null)
                 {
                     nodeObj["inner_type"] = wrapper.InnerNode.GetType().Name;
+                    if (wrapper.ResolveMostInnerNode() is ClassNode innerClass)
+                    {
+                        nodeObj["inner_class"] = innerClass.Name;
+                        nodeObj["inner_uuid"] = GetClassUuid(innerClass);
+                    }
                 }
 
                 result.Add(nodeObj);
@@ -467,7 +478,7 @@ namespace ReClassMCP
 
             InvokeOnMainThread(() =>
             {
-                newNode = BaseNode.CreateInstanceFromType(nodeTypeObj);
+                newNode = CreateNodeInstance(nodeTypeObj);
                 if (newNode != null)
                 {
                     if (!string.IsNullOrEmpty(nodeName))
@@ -487,6 +498,161 @@ namespace ReClassMCP
                 ["name"] = newNode.Name,
                 ["offset"] = newNode.Offset,
                 ["size"] = newNode.MemorySize
+            });
+        }
+
+        private JObject AddNodeAtOffset(JObject args)
+        {
+            var classId = args["class_id"]?.ToString() ?? args["class_name"]?.ToString();
+            var nodeType = args["type"]?.ToString();
+            var nodeName = args["name"]?.ToString();
+            var comment = args["comment"]?.ToString();
+            var overwrite = args["overwrite"]?.Value<bool>() ?? false;
+
+            if (string.IsNullOrEmpty(classId))
+                return Error("Missing 'class_id' or 'class_name' parameter");
+
+            if (string.IsNullOrEmpty(nodeType))
+                return Error("Missing 'type' parameter");
+
+            if (!TryGetInt(args["offset"], out var offset) || offset < 0)
+                return Error("Missing or invalid 'offset' parameter");
+
+            var project = GetCurrentProject();
+            if (project == null)
+                return Error("No project loaded");
+
+            var classNode = FindClass(project.Classes, classId);
+
+            if (classNode == null)
+                return Error($"Class not found: {classId}");
+
+            var nodeTypeObj = GetNodeType(nodeType);
+            if (nodeTypeObj == null)
+                return Error($"Unknown node type: {nodeType}");
+
+            BaseNode newNode = null;
+            string error = null;
+            var coveredNodes = 0;
+
+            InvokeOnMainThread(() =>
+            {
+                newNode = CreateNodeInstance(nodeTypeObj);
+                if (newNode == null)
+                {
+                    error = "Failed to create node";
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(nodeName))
+                {
+                    newNode.Name = nodeName;
+                }
+
+                if (!string.IsNullOrEmpty(comment))
+                {
+                    newNode.Comment = comment;
+                }
+
+                error = AddNodeAtExactOffset(classNode, newNode, offset, overwrite, out coveredNodes);
+                if (error == null)
+                {
+                    if (!string.IsNullOrEmpty(nodeName))
+                    {
+                        newNode.Name = nodeName;
+                    }
+
+                    if (!string.IsNullOrEmpty(comment))
+                    {
+                        newNode.Comment = comment;
+                    }
+                }
+            });
+
+            if (error != null)
+                return Error(error);
+
+            return Success(new JObject
+            {
+                ["type"] = newNode.GetType().Name,
+                ["name"] = newNode.Name,
+                ["offset"] = newNode.Offset,
+                ["size"] = newNode.MemorySize,
+                ["class_size"] = classNode.MemorySize,
+                ["covered_nodes"] = coveredNodes
+            });
+        }
+
+        private JObject AddClassInstanceAtOffset(JObject args)
+        {
+            var classId = args["class_id"]?.ToString() ?? args["class_name"]?.ToString();
+            var targetClassId = args["target_class_id"]?.ToString() ??
+                args["target_class"]?.ToString() ??
+                args["type_class"]?.ToString();
+            var nodeName = args["name"]?.ToString();
+            var comment = args["comment"]?.ToString();
+            var overwrite = args["overwrite"]?.Value<bool>() ?? false;
+
+            if (string.IsNullOrEmpty(classId))
+                return Error("Missing 'class_id' or 'class_name' parameter");
+
+            if (string.IsNullOrEmpty(targetClassId))
+                return Error("Missing 'target_class_id' parameter");
+
+            if (!TryGetInt(args["offset"], out var offset) || offset < 0)
+                return Error("Missing or invalid 'offset' parameter");
+
+            var project = GetCurrentProject();
+            if (project == null)
+                return Error("No project loaded");
+
+            var classNode = FindClass(project.Classes, classId);
+            if (classNode == null)
+                return Error($"Class not found: {classId}");
+
+            var targetClass = FindClass(project.Classes, targetClassId);
+            if (targetClass == null)
+                return Error($"Target class not found: {targetClassId}");
+
+            if (ClassUtil.IsCyclicIfClassIsAccessibleFromParent(classNode, targetClass, project.Classes))
+                return Error($"Adding {targetClass.Name} to {classNode.Name} would create a class cycle");
+
+            var newNode = new ClassInstanceNode();
+            newNode.ChangeInnerNode(targetClass);
+
+            var coveredNodes = 0;
+            string error = null;
+
+            InvokeOnMainThread(() =>
+            {
+                error = AddNodeAtExactOffset(classNode, newNode, offset, overwrite, out coveredNodes);
+                if (error == null)
+                {
+                    if (!string.IsNullOrEmpty(nodeName))
+                    {
+                        newNode.Name = nodeName;
+                    }
+
+                    if (!string.IsNullOrEmpty(comment))
+                    {
+                        newNode.Comment = comment;
+                    }
+                }
+            });
+
+            if (error != null)
+                return Error(error);
+
+            return Success(new JObject
+            {
+                ["type"] = newNode.GetType().Name,
+                ["name"] = newNode.Name,
+                ["offset"] = newNode.Offset,
+                ["size"] = newNode.MemorySize,
+                ["inner_class"] = targetClass.Name,
+                ["inner_uuid"] = GetClassUuid(targetClass),
+                ["class_size"] = classNode.MemorySize,
+                ["covered_nodes"] = coveredNodes
             });
         }
 
@@ -604,7 +770,7 @@ namespace ReClassMCP
 
             InvokeOnMainThread(() =>
             {
-                newNode = BaseNode.CreateInstanceFromType(nodeTypeObj);
+                newNode = CreateNodeInstance(nodeTypeObj);
                 if (newNode != null)
                 {
                     classNode.ReplaceChildNode(oldNode, newNode);
@@ -697,6 +863,146 @@ namespace ReClassMCP
             }
 
             return null;
+        }
+
+        private BaseNode CreateNodeInstance(Type nodeType)
+        {
+            if (nodeType == typeof(PointerNode))
+            {
+                return BaseNode.CreateInstanceFromType(nodeType, false);
+            }
+
+            return BaseNode.CreateInstanceFromType(nodeType);
+        }
+
+        private string AddNodeAtExactOffset(ClassNode classNode, BaseNode newNode, int offset, bool overwrite, out int coveredNodeCount)
+        {
+            coveredNodeCount = 0;
+
+            var endOffset = offset + newNode.MemorySize;
+            if (endOffset < offset)
+                return "Offset plus node size overflowed";
+
+            classNode.BeginUpdate();
+            try
+            {
+                classNode.UpdateOffsets();
+
+                if (endOffset > classNode.MemorySize)
+                {
+                    classNode.AddBytes(endOffset - classNode.MemorySize);
+                    classNode.UpdateOffsets();
+                }
+
+                var boundaryError = EnsureNodeBoundary(classNode, offset);
+                if (boundaryError != null)
+                    return boundaryError;
+
+                boundaryError = EnsureNodeBoundary(classNode, endOffset);
+                if (boundaryError != null)
+                    return boundaryError;
+
+                classNode.UpdateOffsets();
+
+                var coveredNodes = classNode.Nodes
+                    .Where(n => n.Offset >= offset && n.Offset < endOffset)
+                    .ToList();
+
+                if (coveredNodes.Count == 0)
+                    return $"No padding found at offset 0x{offset:X}";
+
+                var coveredSize = coveredNodes.Sum(n => n.MemorySize);
+                if (coveredSize != newNode.MemorySize)
+                    return $"Internal layout error: covered size {coveredSize} does not match node size {newNode.MemorySize}";
+
+                if (!overwrite)
+                {
+                    var nonPadding = coveredNodes.FirstOrDefault(n => !(n is BaseHexNode));
+                    if (nonPadding != null)
+                    {
+                        return $"Offset range 0x{offset:X}-0x{endOffset:X} overlaps existing {nonPadding.GetType().Name} '{nonPadding.Name}' at 0x{nonPadding.Offset:X}. Pass overwrite=true to replace it.";
+                    }
+                }
+
+                var firstNode = coveredNodes[0];
+                classNode.ReplaceChildNode(firstNode, newNode);
+
+                foreach (var node in coveredNodes.Skip(1))
+                {
+                    classNode.RemoveNode(node);
+                }
+
+                newNode.Offset = offset;
+                coveredNodeCount = coveredNodes.Count;
+                return null;
+            }
+            finally
+            {
+                classNode.EndUpdate();
+            }
+        }
+
+        private string EnsureNodeBoundary(ClassNode classNode, int offset)
+        {
+            while (true)
+            {
+                classNode.UpdateOffsets();
+
+                if (offset == classNode.MemorySize || classNode.Nodes.Any(n => n.Offset == offset))
+                    return null;
+
+                var containingNode = classNode.Nodes.FirstOrDefault(n => n.Offset < offset && offset < n.Offset + n.MemorySize);
+                if (containingNode == null)
+                    return $"Unable to locate node boundary for offset 0x{offset:X}";
+
+                if (!(containingNode is BaseHexNode))
+                    return $"Offset 0x{offset:X} falls inside existing {containingNode.GetType().Name} '{containingNode.Name}' at 0x{containingNode.Offset:X}";
+
+                var leadingSize = offset - containingNode.Offset;
+                var paddingNode = CreatePaddingNode(leadingSize);
+                if (paddingNode == null)
+                    return $"Unable to split padding at offset 0x{offset:X}";
+
+                classNode.ReplaceChildNode(containingNode, paddingNode);
+            }
+        }
+
+        private BaseNode CreatePaddingNode(int maxSize)
+        {
+            if (maxSize <= 0)
+                return null;
+
+            if (IntPtr.Size == 8 && maxSize >= 8)
+                return new Hex64Node();
+
+            if (maxSize >= 4)
+                return new Hex32Node();
+
+            if (maxSize >= 2)
+                return new Hex16Node();
+
+            return new Hex8Node();
+        }
+
+        private bool TryGetInt(JToken token, out int value)
+        {
+            value = 0;
+            if (token == null)
+                return false;
+
+            if (token.Type == JTokenType.Integer)
+            {
+                value = token.Value<int>();
+                return true;
+            }
+
+            var text = token.ToString();
+            if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                return int.TryParse(text.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out value);
+            }
+
+            return int.TryParse(text, out value);
         }
 
         private ClassNode FindClass(IReadOnlyList<ClassNode> classes, string identifier)

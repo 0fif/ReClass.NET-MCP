@@ -232,6 +232,74 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="AddNodeAtOffset",
+            description="Add a new node/field to a class at an exact byte offset, padding gaps as needed",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "class_id": {
+                        "type": "string",
+                        "description": "Class UUID or name",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Byte offset for the new node/field",
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Node type (e.g., 'int32', 'float', 'pointer', 'hex64', 'utf8text')",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Name for the new node (optional)",
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Comment text (optional)",
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Replace existing non-padding nodes in the target range",
+                    },
+                },
+                "required": ["class_id", "offset", "type"],
+            },
+        ),
+        Tool(
+            name="AddClassInstanceAtOffset",
+            description="Add a nested class/structure field to a class at an exact byte offset",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "class_id": {
+                        "type": "string",
+                        "description": "Class UUID or name to modify",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Byte offset for the nested class field",
+                    },
+                    "target_class_id": {
+                        "type": "string",
+                        "description": "Class UUID or name to use as the nested field type",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Name for the new nested field (optional)",
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Comment text (optional)",
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Replace existing non-padding nodes in the target range",
+                    },
+                },
+                "required": ["class_id", "offset", "target_class_id"],
+            },
+        ),
+        Tool(
             name="RenameNode",
             description="Rename a node/field in a class",
             inputSchema={
@@ -377,6 +445,36 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         if "name" in arguments:
             args["name"] = arguments["name"]
         result = client.send_command("add_node", args)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "AddNodeAtOffset":
+        args = {
+            "class_id": arguments["class_id"],
+            "offset": arguments["offset"],
+            "type": arguments["type"],
+        }
+        if "name" in arguments:
+            args["name"] = arguments["name"]
+        if "comment" in arguments:
+            args["comment"] = arguments["comment"]
+        if "overwrite" in arguments:
+            args["overwrite"] = arguments["overwrite"]
+        result = client.send_command("add_node_at_offset", args)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    elif name == "AddClassInstanceAtOffset":
+        args = {
+            "class_id": arguments["class_id"],
+            "offset": arguments["offset"],
+            "target_class_id": arguments["target_class_id"],
+        }
+        if "name" in arguments:
+            args["name"] = arguments["name"]
+        if "comment" in arguments:
+            args["comment"] = arguments["comment"]
+        if "overwrite" in arguments:
+            args["overwrite"] = arguments["overwrite"]
+        result = client.send_command("add_class_instance_at_offset", args)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "RenameNode":
