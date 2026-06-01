@@ -17,6 +17,7 @@ Compared with the original project, this fork adds:
 - Exact-offset field insertion with automatic padding/splitting
 - Nested class/structure insertion for real struct composition
 - Safer pointer handling so plain `pointer` fields do not create throwaway dummy classes
+- Short-lived TCP connections so MCP calls keep working after ReClass.NET closes idle sockets
 - Updated MCP server docs and `uv` dependency locking
 
 ## Components

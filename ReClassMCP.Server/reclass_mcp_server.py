@@ -28,51 +28,49 @@ class ReClassClient:
     def __init__(self, host: str = RECLASS_HOST, port: int = RECLASS_PORT):
         self.host = host
         self.port = port
-        self.sock = None
 
     def connect(self) -> bool:
-        """Connect to the ReClass.NET plugin."""
+        """Check whether the ReClass.NET plugin accepts TCP connections."""
         try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.settimeout(10)
-            self.sock.connect((self.host, self.port))
-            return True
-        except Exception:
-            self.sock = None
+            with socket.create_connection((self.host, self.port), timeout=10):
+                return True
+        except OSError:
             return False
 
     def disconnect(self):
-        """Disconnect from the ReClass.NET plugin."""
-        if self.sock:
-            try:
-                self.sock.close()
-            except Exception:
-                pass
-            self.sock = None
+        """Compatibility no-op; commands use short-lived connections."""
+        return None
 
     def send_command(self, command: str, args: dict = None) -> dict:
         """Send a command to the ReClass.NET plugin and get the response."""
-        if not self.sock:
-            if not self.connect():
-                return {"success": False, "error": "Failed to connect to ReClass.NET plugin"}
-
         request = {"command": command, "args": args or {}}
+        request_bytes = (json.dumps(request) + "\n").encode("utf-8")
+        last_error = None
 
-        try:
-            self.sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
-            response = b""
-            while True:
-                chunk = self.sock.recv(4096)
-                if not chunk:
-                    break
-                response += chunk
-                if b"\n" in response:
-                    break
+        for _ in range(2):
+            try:
+                with socket.create_connection((self.host, self.port), timeout=10) as sock:
+                    sock.settimeout(30)
+                    sock.sendall(request_bytes)
 
-            return json.loads(response.decode("utf-8").strip())
-        except Exception as e:
-            self.disconnect()
-            return {"success": False, "error": str(e)}
+                    response = bytearray()
+                    while b"\n" not in response:
+                        chunk = sock.recv(4096)
+                        if not chunk:
+                            break
+                        response.extend(chunk)
+
+                if not response:
+                    return {"success": False, "error": "No response from ReClass.NET plugin"}
+
+                response_line = bytes(response).split(b"\n", 1)[0]
+                return json.loads(response_line.decode("utf-8"))
+            except (OSError, socket.timeout) as e:
+                last_error = e
+            except json.JSONDecodeError as e:
+                return {"success": False, "error": f"Invalid response from ReClass.NET plugin: {e}"}
+
+        return {"success": False, "error": str(last_error)}
 
 
 # Global client instance
