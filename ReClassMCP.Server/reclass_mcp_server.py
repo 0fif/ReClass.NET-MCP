@@ -163,13 +163,33 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="GetNodes",
-            description="Get all nodes/fields of a specific class",
+            description="Get nodes/fields of a specific class, with optional paging and filtering for large sparse classes",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "class_id": {
                         "type": "string",
                         "description": "Class UUID or name",
+                    },
+                    "start_index": {
+                        "type": "integer",
+                        "description": "Zero-based index into the filtered top-level node list (default 0)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of top-level nodes to return (default 500, max 5000)",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "Only return top-level nodes intersecting this byte offset",
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "When offset is set, only return nodes intersecting offset..offset+size",
+                    },
+                    "include_padding": {
+                        "type": "boolean",
+                        "description": "Include Hex padding nodes in the result (default true)",
                     },
                 },
                 "required": ["class_id"],
@@ -417,9 +437,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "GetNodes":
-        result = client.send_command("get_nodes", {
-            "class_id": arguments["class_id"],
-        })
+        args = {"class_id": arguments["class_id"]}
+        for key in ("start_index", "limit", "offset", "size", "include_padding"):
+            if key in arguments:
+                args[key] = arguments[key]
+        result = client.send_command("get_nodes", args)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     elif name == "ParseAddress":

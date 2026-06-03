@@ -17,6 +17,7 @@ Compared with the original project, this fork adds:
 - Exact-offset field insertion with automatic padding/splitting
 - Nested class/structure insertion for real struct composition
 - Safer pointer handling so plain `pointer` fields do not create throwaway dummy classes
+- Paged and filtered `GetNodes` output so large sparse classes do not force multi-megabyte MCP responses
 - Short-lived TCP connections so MCP calls keep working after ReClass.NET closes idle sockets
 - Updated MCP server docs and `uv` dependency locking
 
@@ -166,7 +167,7 @@ Or using `uv`:
 |------|-------------|
 | `GetClasses` | List all classes in the project |
 | `GetClass` | Get detailed info about a specific class |
-| `GetNodes` | Get all nodes/fields in a class |
+| `GetNodes` | Get nodes/fields in a class, with optional paging/range/padding filters |
 | `CreateClass` | Create a new class/structure |
 | `AddNode` | Add a new field to a class |
 | `AddNodeAtOffset` | Add a new field at an exact byte offset, padding gaps as needed |
@@ -197,6 +198,10 @@ Once configured, you can ask your MCP client to:
 
 "Analyze the memory at 0x7FF12345 and suggest appropriate field types"
 ```
+
+For very large sparse classes, avoid unbounded class dumps. Use `GetClasses` for
+summary information, then call `GetNodes` with `include_padding=false`, `limit`,
+and optionally `offset`/`size` to inspect only the relevant fields.
 
 ## License
 

@@ -270,7 +270,43 @@ namespace ReClassMCP
             if (classNode == null)
                 return Error($"Class not found: {classId}");
 
-            return Success(new JObject { ["nodes"] = SerializeNodes(classNode.Nodes) });
+            var options = NodeQueryOptions.FromArgs(args);
+            if (options.Error != null)
+                return Error(options.Error);
+
+            var filteredNodes = FilterNodes(classNode.Nodes, options);
+            var totalMatchingNodes = filteredNodes.Count;
+            var pagedNodes = filteredNodes
+                .Skip(options.StartIndex)
+                .Take(options.Limit)
+                .ToList();
+
+            var response = new JObject
+            {
+                ["nodes"] = SerializeNodes(pagedNodes),
+                ["total_count"] = classNode.Nodes.Count,
+                ["matching_count"] = totalMatchingNodes,
+                ["returned_count"] = pagedNodes.Count,
+                ["start_index"] = options.StartIndex,
+                ["limit"] = options.Limit,
+                ["has_more"] = options.StartIndex + pagedNodes.Count < totalMatchingNodes
+            };
+
+            if (options.StartIndex + pagedNodes.Count < totalMatchingNodes)
+            {
+                response["next_start_index"] = options.StartIndex + pagedNodes.Count;
+            }
+
+            return Success(response);
+        }
+
+        private List<BaseNode> FilterNodes(IReadOnlyList<BaseNode> nodes, NodeQueryOptions options)
+        {
+            return nodes
+                .Where(n => options.IncludePadding || !(n is BaseHexNode))
+                .Where(n => options.RangeEnd == null || n.Offset < options.RangeEnd.Value)
+                .Where(n => options.Offset == null || n.Offset + n.MemorySize > options.Offset.Value)
+                .ToList();
         }
 
         private JArray SerializeNodes(IReadOnlyList<BaseNode> nodes)
@@ -1003,6 +1039,111 @@ namespace ReClassMCP
             }
 
             return int.TryParse(text, out value);
+        }
+
+        private class NodeQueryOptions
+        {
+            public int? Offset { get; private set; }
+            public int? RangeEnd { get; private set; }
+            public int StartIndex { get; private set; }
+            public int Limit { get; private set; }
+            public bool IncludePadding { get; private set; }
+            public string Error { get; private set; }
+
+            public static NodeQueryOptions FromArgs(JObject args)
+            {
+                var options = new NodeQueryOptions
+                {
+                    StartIndex = 0,
+                    Limit = 500,
+                    IncludePadding = true
+                };
+
+                if (TryReadInt(args["start_index"], out var startIndex))
+                {
+                    if (startIndex < 0)
+                    {
+                        options.Error = "Invalid 'start_index' parameter";
+                        return options;
+                    }
+
+                    options.StartIndex = startIndex;
+                }
+
+                if (TryReadInt(args["limit"], out var limit))
+                {
+                    if (limit <= 0 || limit > 5000)
+                    {
+                        options.Error = "'limit' must be between 1 and 5000";
+                        return options;
+                    }
+
+                    options.Limit = limit;
+                }
+
+                if (TryReadInt(args["offset"], out var offset))
+                {
+                    if (offset < 0)
+                    {
+                        options.Error = "Invalid 'offset' parameter";
+                        return options;
+                    }
+
+                    options.Offset = offset;
+                }
+
+                if (TryReadInt(args["size"], out var size))
+                {
+                    if (size <= 0)
+                    {
+                        options.Error = "Invalid 'size' parameter";
+                        return options;
+                    }
+
+                    if (options.Offset == null)
+                    {
+                        options.Error = "'size' requires 'offset'";
+                        return options;
+                    }
+
+                    var rangeEnd = options.Offset.Value + size;
+                    if (rangeEnd < options.Offset.Value)
+                    {
+                        options.Error = "Offset plus size overflowed";
+                        return options;
+                    }
+
+                    options.RangeEnd = rangeEnd;
+                }
+
+                if (args["include_padding"] != null)
+                {
+                    options.IncludePadding = args["include_padding"].Value<bool>();
+                }
+
+                return options;
+            }
+
+            private static bool TryReadInt(JToken token, out int value)
+            {
+                value = 0;
+                if (token == null)
+                    return false;
+
+                if (token.Type == JTokenType.Integer)
+                {
+                    value = token.Value<int>();
+                    return true;
+                }
+
+                var text = token.ToString();
+                if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                {
+                    return int.TryParse(text.Substring(2), System.Globalization.NumberStyles.HexNumber, null, out value);
+                }
+
+                return int.TryParse(text, out value);
+            }
         }
 
         private ClassNode FindClass(IReadOnlyList<ClassNode> classes, string identifier)
