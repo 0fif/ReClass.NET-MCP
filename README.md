@@ -1,4 +1,4 @@
-# ReClass.NET MCP Integration
+# ReClass.NET MCP - _Enhanced_
 
 This fork provides an MCP (Model Context Protocol) integration for ReClass.NET,
 allowing Claude Code, Codex, opencode, and other MCP clients to interact with
